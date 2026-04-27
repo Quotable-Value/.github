@@ -1,0 +1,82 @@
+name: NodeJS checks
+
+on:
+  workflow_call:
+    inputs:
+      working-directory:
+        description: Directory containing package.json.
+        required: false
+        type: string
+        default: .
+      node-version:
+        description: Node.js version to install for checks.
+        required: false
+        type: string
+        default: '20'
+      runner:
+        description: Runner label to use for both jobs.
+        required: false
+        type: string
+        default: ubuntu-latest
+      install-command:
+        description: Command used to install dependencies.
+        required: false
+        type: string
+        default: npm install
+      lint-command:
+        description: Command used to run linting.
+        required: false
+        type: string
+        default: npm run lint
+      coverage-command:
+        description: Command used to run unit tests with coverage.
+        required: false
+        type: string
+        default: npm run coverage
+
+jobs:
+  linting:
+    name: Linting
+    runs-on: ${{ inputs.runner }}
+    defaults:
+      run:
+        working-directory: ${{ inputs.working-directory }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ inputs.node-version }}
+          cache: npm
+          cache-dependency-path: ${{ inputs.working-directory }}/package-lock.json
+
+      - name: Install dependencies
+        run: ${{ inputs.install-command }}
+
+      - name: Run linting
+        run: ${{ inputs.lint-command }}
+
+  unit:
+    name: Unit tests and coverage
+    runs-on: ${{ inputs.runner }}
+    defaults:
+      run:
+        working-directory: ${{ inputs.working-directory }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ inputs.node-version }}
+          cache: npm
+          cache-dependency-path: ${{ inputs.working-directory }}/package-lock.json
+
+      - name: Install dependencies
+        run: ${{ inputs.install-command }}
+
+      - name: Run unit tests with coverage
+        run: ${{ inputs.coverage-command }}
