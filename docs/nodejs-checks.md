@@ -6,7 +6,7 @@ It is based on the current `validation` QA workflow:
 
 - install dependencies with `npm install`
 - run linting with `npm run lint`
-- run unit tests with coverage using `npm run coverage`
+- keep the coverage job commented out for the initial pilot
 
 The consuming repository keeps ownership of its local config, including `.nycrc.yml`, ESLint config, npm scripts, and package lock files. The shared workflow only standardises the GitHub Actions wiring.
 
@@ -30,9 +30,6 @@ jobs:
     with:
       runner: codebuild-quotable-value-validation-build-${{ github.run_id }}-${{ github.run_attempt }}
       node-version: '20'
-      install-command: npm install
-      lint-command: npm run lint
-      coverage-command: npm run coverage
     secrets: inherit
 ```
 
@@ -47,9 +44,6 @@ jobs:
     with:
       working-directory: consent
       node-version: '20'
-      install-command: npm install
-      lint-command: npm run lint
-      coverage-command: npm run coverage
     secrets: inherit
 ```
 

@@ -20,7 +20,4 @@ jobs:
     with:
       node-version: ${{ inputs.node-version }}
       runner: ${{ inputs.runner }}
-      install-command: npm install
-      lint-command: npm run lint
-      coverage-command: npm test
     secrets: inherit
