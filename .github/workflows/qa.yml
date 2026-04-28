@@ -19,11 +19,11 @@ jobs:
       - name: Run linting
         run: npm run lint
 
-#  unit:
-#    runs-on: ${{ inputs.runner }}
-#    steps:
-#      - uses: actions/checkout@v2
-#      - name: Install dependencies
-#        run: npm install
-#      - name: Run unit tests with coverage
-#        run: npm run coverage
+  unit:
+    runs-on: ${{ inputs.runner }}
+    steps:
+      - uses: actions/checkout@v2
+      - name: Install dependencies
+        run: npm install
+      - name: Run unit tests with coverage
+        run: npm run coverage
