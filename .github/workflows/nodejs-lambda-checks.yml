@@ -1,0 +1,26 @@
+name: NodeJS Lambda checks
+
+on:
+  workflow_call:
+    inputs:
+      node-version:
+        description: Node.js version to install for checks.
+        required: false
+        type: string
+        default: '20'
+      runner:
+        description: Runner label to use for both jobs.
+        required: false
+        type: string
+        default: ubuntu-latest
+
+jobs:
+  nodejs:
+    uses: Quotable-Value/.github/.github/workflows/nodejs-checks.yml@feature/DEV-8027-nodejs-actions-pilot
+    with:
+      node-version: ${{ inputs.node-version }}
+      runner: ${{ inputs.runner }}
+      install-command: npm install
+      lint-command: npm run lint
+      coverage-command: npm test
+    secrets: inherit
