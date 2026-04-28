@@ -1,67 +1,29 @@
-name: NodeJS checks
+name: QA
 
 on:
   workflow_call:
     inputs:
-      working-directory:
-        description: Directory containing package.json.
-        required: false
-        type: string
-        default: .
-      node-version:
-        description: Node.js version to install for checks.
-        required: false
-        type: string
-        default: '20'
       runner:
-        description: Runner label to use.
+        description: Runner label to use for NodeJS checks.
         required: false
         type: string
         default: ubuntu-latest
 
 jobs:
   linting:
-    name: Linting
     runs-on: ${{ inputs.runner }}
-    defaults:
-      run:
-        working-directory: ${{ inputs.working-directory }}
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: ${{ inputs.node-version }}
-          cache: npm
-          cache-dependency-path: ${{ inputs.working-directory }}/package-lock.json
-
+      - uses: actions/checkout@v2
       - name: Install dependencies
         run: npm install
-
       - name: Run linting
         run: npm run lint
 
 #  unit:
-#    name: Unit tests and coverage
 #    runs-on: ${{ inputs.runner }}
-#    defaults:
-#      run:
-#        working-directory: ${{ inputs.working-directory }}
 #    steps:
-#      - name: Checkout
-#        uses: actions/checkout@v4
-#
-#      - name: Setup Node.js
-#        uses: actions/setup-node@v4
-#        with:
-#          node-version: ${{ inputs.node-version }}
-#          cache: npm
-#          cache-dependency-path: ${{ inputs.working-directory }}/package-lock.json
-#
+#      - uses: actions/checkout@v2
 #      - name: Install dependencies
 #        run: npm install
-#
 #      - name: Run unit tests with coverage
 #        run: npm run coverage
