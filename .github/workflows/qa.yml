@@ -8,12 +8,38 @@ on:
         required: false
         type: string
         default: ubuntu-latest
+      aws-region:
+        description: AWS region for CodeArtifact authentication.
+        required: false
+        type: string
+        default: ap-southeast-2
+      aws-role-to-assume:
+        description: AWS role ARN used to access CodeArtifact.
+        required: false
+        type: string
+        default: ''
+
+permissions:
+  contents: read
+  id-token: write
 
 jobs:
   linting:
     runs-on: ${{ inputs.runner }}
+    permissions:
+      contents: read
+      id-token: write
     steps:
       - uses: actions/checkout@v2
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ inputs.aws-role-to-assume || vars.AWS_CODEARTIFACT_READ_ROLE_ARN || 'arn:aws:iam::948396734470:role/github-actions-codeartifact-read' }}
+          aws-region: ${{ inputs.aws-region }}
+      - name: Export CodeArtifact token
+        run: |
+          CODEARTIFACT_AUTH_TOKEN=$(aws codeartifact get-authorization-token --domain quotable-value --domain-owner 948396734470 --region "${{ inputs.aws-region }}" --query authorizationToken --output text)
+          echo "::add-mask::$CODEARTIFACT_AUTH_TOKEN"
+          echo "CODEARTIFACT_AUTH_TOKEN=$CODEARTIFACT_AUTH_TOKEN" >> "$GITHUB_ENV"
       - name: Install dependencies
         run: npm install
       - name: Run linting
@@ -21,8 +47,20 @@ jobs:
 
   unit:
     runs-on: ${{ inputs.runner }}
+    permissions:
+      contents: read
+      id-token: write
     steps:
       - uses: actions/checkout@v2
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ inputs.aws-role-to-assume || vars.AWS_CODEARTIFACT_READ_ROLE_ARN || 'arn:aws:iam::948396734470:role/github-actions-codeartifact-read' }}
+          aws-region: ${{ inputs.aws-region }}
+      - name: Export CodeArtifact token
+        run: |
+          CODEARTIFACT_AUTH_TOKEN=$(aws codeartifact get-authorization-token --domain quotable-value --domain-owner 948396734470 --region "${{ inputs.aws-region }}" --query authorizationToken --output text)
+          echo "::add-mask::$CODEARTIFACT_AUTH_TOKEN"
+          echo "CODEARTIFACT_AUTH_TOKEN=$CODEARTIFACT_AUTH_TOKEN" >> "$GITHUB_ENV"
       - name: Install dependencies
         run: npm install
       - name: Run unit tests with coverage
