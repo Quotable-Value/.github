@@ -23,6 +23,26 @@ on:
         required: false
         type: string
         default: ''
+      working-directory:
+        description: Directory containing the NodeJS package.json.
+        required: false
+        type: string
+        default: .
+      install-command:
+        description: Dependency installation command.
+        required: false
+        type: string
+        default: npm install
+      lint-command:
+        description: Lint command.
+        required: false
+        type: string
+        default: npm run lint
+      coverage-command:
+        description: Unit test coverage command.
+        required: false
+        type: string
+        default: npm run coverage
 
 permissions:
   contents: read
@@ -34,6 +54,9 @@ jobs:
     permissions:
       contents: read
       id-token: write
+    defaults:
+      run:
+        working-directory: ${{ inputs.working-directory }}
     steps:
       - uses: actions/checkout@v2
       - uses: actions/setup-node@v4
@@ -51,9 +74,9 @@ jobs:
           echo "::add-mask::$CODEARTIFACT_AUTH_TOKEN"
           echo "CODEARTIFACT_AUTH_TOKEN=$CODEARTIFACT_AUTH_TOKEN" >> "$GITHUB_ENV"
       - name: Install dependencies
-        run: npm install
+        run: ${{ inputs.install-command }}
       - name: Run linting
-        run: npm run lint
+        run: ${{ inputs.lint-command }}
 
   unit:
     runs-on: ${{ inputs.runner }}
@@ -62,6 +85,9 @@ jobs:
       id-token: write
     env:
       ENV: local
+    defaults:
+      run:
+        working-directory: ${{ inputs.working-directory }}
     steps:
       - uses: actions/checkout@v2
       - uses: actions/setup-node@v4
@@ -79,10 +105,10 @@ jobs:
           echo "::add-mask::$CODEARTIFACT_AUTH_TOKEN"
           echo "CODEARTIFACT_AUTH_TOKEN=$CODEARTIFACT_AUTH_TOKEN" >> "$GITHUB_ENV"
       - name: Install dependencies
-        run: npm install
+        run: ${{ inputs.install-command }}
       - name: Prepare local test config
         run: |
           if [ ! -f config.json ] && [ -f config.sample.json ]; then cp config.sample.json config.json; fi
           if [ ! -f test/config.json ] && [ -f test/config.sample.json ]; then cp test/config.sample.json test/config.json; fi
       - name: Run unit tests with coverage
-        run: npm run coverage
+        run: ${{ inputs.coverage-command }}
