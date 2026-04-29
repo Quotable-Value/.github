@@ -32,8 +32,9 @@ jobs:
     steps:
       - uses: actions/checkout@v2
       - uses: aws-actions/configure-aws-credentials@v4
+        if: ${{ inputs.aws-role-to-assume != '' || vars.AWS_CODEARTIFACT_READ_ROLE_ARN != '' }}
         with:
-          role-to-assume: ${{ inputs.aws-role-to-assume || vars.AWS_CODEARTIFACT_READ_ROLE_ARN || 'arn:aws:iam::948396734470:role/github-actions-codeartifact-read' }}
+          role-to-assume: ${{ inputs.aws-role-to-assume || vars.AWS_CODEARTIFACT_READ_ROLE_ARN }}
           aws-region: ${{ inputs.aws-region }}
       - name: Export CodeArtifact token
         run: |
@@ -53,8 +54,9 @@ jobs:
     steps:
       - uses: actions/checkout@v2
       - uses: aws-actions/configure-aws-credentials@v4
+        if: ${{ inputs.aws-role-to-assume != '' || vars.AWS_CODEARTIFACT_READ_ROLE_ARN != '' }}
         with:
-          role-to-assume: ${{ inputs.aws-role-to-assume || vars.AWS_CODEARTIFACT_READ_ROLE_ARN || 'arn:aws:iam::948396734470:role/github-actions-codeartifact-read' }}
+          role-to-assume: ${{ inputs.aws-role-to-assume || vars.AWS_CODEARTIFACT_READ_ROLE_ARN }}
           aws-region: ${{ inputs.aws-region }}
       - name: Export CodeArtifact token
         run: |
