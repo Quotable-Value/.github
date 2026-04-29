@@ -1,0 +1,75 @@
+name: SBT Kubernetes QA
+
+on:
+  workflow_call:
+    inputs:
+      working-directory:
+        description: Directory containing build.sbt.
+        required: false
+        type: string
+        default: .
+      java-version:
+        description: Java version to install before running SBT.
+        required: false
+        type: string
+        default: '8'
+      runner:
+        description: Runner label to use for SBT checks.
+        required: false
+        type: string
+        default: ubuntu-latest
+      coverage-command:
+        description: SBT coverage command.
+        required: false
+        type: string
+        default: sbt jacoco
+      package-command:
+        description: Kubernetes package verification command. Set to an empty string to skip.
+        required: false
+        type: string
+        default: sbt -DbuildTarget=kubernetes docker:stage
+
+permissions:
+  contents: read
+
+jobs:
+  coverage:
+    runs-on: ${{ inputs.runner }}
+    defaults:
+      run:
+        working-directory: ${{ inputs.working-directory }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-java@v4
+        with:
+          distribution: corretto
+          java-version: ${{ inputs.java-version }}
+          cache: sbt
+      - uses: sbt/setup-sbt@v1
+      - name: Fetch tags
+        run: git fetch --tags --force
+      - name: Run SBT coverage
+        run: ${{ inputs.coverage-command }}
+
+  kubernetes-package:
+    if: ${{ inputs.package-command != '' }}
+    runs-on: ${{ inputs.runner }}
+    defaults:
+      run:
+        working-directory: ${{ inputs.working-directory }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-java@v4
+        with:
+          distribution: corretto
+          java-version: ${{ inputs.java-version }}
+          cache: sbt
+      - uses: sbt/setup-sbt@v1
+      - name: Fetch tags
+        run: git fetch --tags --force
+      - name: Verify Kubernetes package
+        run: ${{ inputs.package-command }}
