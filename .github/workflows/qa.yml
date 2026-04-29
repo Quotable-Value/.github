@@ -17,7 +17,7 @@ on:
         description: AWS role ARN used to access CodeArtifact.
         required: false
         type: string
-        default: ''
+        default: arn:aws:iam::948396734470:role/github-actions-codeartifact-read
 
 permissions:
   contents: read
