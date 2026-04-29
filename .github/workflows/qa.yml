@@ -18,6 +18,11 @@ on:
         required: false
         type: string
         default: arn:aws:iam::948396734470:role/github-actions-codeartifact-read
+      node-version:
+        description: Node.js version to install before running npm commands.
+        required: false
+        type: string
+        default: ''
 
 permissions:
   contents: read
@@ -31,6 +36,10 @@ jobs:
       id-token: write
     steps:
       - uses: actions/checkout@v2
+      - uses: actions/setup-node@v4
+        if: ${{ inputs.node-version != '' }}
+        with:
+          node-version: ${{ inputs.node-version }}
       - uses: aws-actions/configure-aws-credentials@v4
         if: ${{ inputs.aws-role-to-assume != '' || vars.AWS_CODEARTIFACT_READ_ROLE_ARN != '' }}
         with:
@@ -51,8 +60,14 @@ jobs:
     permissions:
       contents: read
       id-token: write
+    env:
+      ENV: local
     steps:
       - uses: actions/checkout@v2
+      - uses: actions/setup-node@v4
+        if: ${{ inputs.node-version != '' }}
+        with:
+          node-version: ${{ inputs.node-version }}
       - uses: aws-actions/configure-aws-credentials@v4
         if: ${{ inputs.aws-role-to-assume != '' || vars.AWS_CODEARTIFACT_READ_ROLE_ARN != '' }}
         with:
@@ -65,5 +80,9 @@ jobs:
           echo "CODEARTIFACT_AUTH_TOKEN=$CODEARTIFACT_AUTH_TOKEN" >> "$GITHUB_ENV"
       - name: Install dependencies
         run: npm install
+      - name: Prepare local test config
+        run: |
+          if [ ! -f config.json ] && [ -f config.sample.json ]; then cp config.sample.json config.json; fi
+          if [ ! -f test/config.json ] && [ -f test/config.sample.json ]; then cp test/config.sample.json test/config.json; fi
       - name: Run unit tests with coverage
         run: npm run coverage
