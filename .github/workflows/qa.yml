@@ -18,6 +18,11 @@ on:
         required: false
         type: string
         default: arn:aws:iam::948396734470:role/github-actions-codeartifact-read
+      ecr-login:
+        description: Log in to Amazon ECR before running unit test coverage.
+        required: false
+        type: boolean
+        default: false
       node-version:
         description: Node.js version to install before running npm commands.
         required: false
@@ -208,6 +213,11 @@ jobs:
           echo "::add-mask::$CODEARTIFACT_AUTH_TOKEN"
           echo "CODEARTIFACT_AUTH_TOKEN=$CODEARTIFACT_AUTH_TOKEN" >> "$GITHUB_ENV"
 
+      - name: Log in to Amazon ECR
+        if: ${{ inputs.ecr-login }}
+        run: |
+          aws ecr get-login-password --region "${{ inputs.aws-region }}" | docker login --username AWS --password-stdin "948396734470.dkr.ecr.${{ inputs.aws-region }}.amazonaws.com"
+
       - name: Install dependencies
         id: install
         run: ${{ inputs.install-command }}
@@ -233,6 +243,7 @@ jobs:
             echo ""
             echo "- Working directory: \`${{ inputs.working-directory }}\`"
             echo "- Install result: \`${{ steps.install.outcome || 'skipped' }}\`"
+            echo "- ECR login: \`${{ inputs.ecr-login }}\`"
             echo "- Unit result: \`${{ steps.coverage.outcome || 'skipped' }}\`"
             echo ""
             echo "Command:"
