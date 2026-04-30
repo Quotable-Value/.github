@@ -1,0 +1,68 @@
+name: Java Gradle QA
+
+on:
+  workflow_call:
+    inputs:
+      working-directory:
+        description: Directory containing the Gradle wrapper.
+        required: false
+        type: string
+        default: .
+      java-version:
+        description: Java version for the Gradle build.
+        required: false
+        type: string
+        default: '8'
+      gradle-command:
+        description: Gradle command to run.
+        required: false
+        type: string
+        default: ./gradlew build
+      runner:
+        description: Runner label to use for Java Gradle checks.
+        required: false
+        type: string
+        default: ubuntu-latest
+      aws-region:
+        description: AWS region for CodeArtifact authentication.
+        required: false
+        type: string
+        default: ap-southeast-2
+      aws-role-to-assume:
+        description: AWS role ARN used to access CodeArtifact.
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  gradle:
+    runs-on: ${{ inputs.runner }}
+    defaults:
+      run:
+        working-directory: ${{ inputs.working-directory }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: corretto
+          java-version: ${{ inputs.java-version }}
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ inputs.aws-role-to-assume }}
+          aws-region: ${{ inputs.aws-region }}
+
+      - name: Export CodeArtifact token
+        run: |
+          CODEARTIFACT_AUTH_TOKEN=$(aws codeartifact get-authorization-token --domain quotable-value --domain-owner 948396734470 --region "${{ inputs.aws-region }}" --query authorizationToken --output text)
+          echo "CODEARTIFACT_AUTH_TOKEN=$CODEARTIFACT_AUTH_TOKEN" >> "$GITHUB_ENV"
+
+      - name: Prepare Gradle wrapper
+        run: chmod +x ./gradlew
+
+      - name: Run Gradle checks
+        run: ${{ inputs.gradle-command }}

@@ -1,0 +1,114 @@
+name: QA
+
+on:
+  workflow_call:
+    inputs:
+      runner:
+        description: Runner label to use for NodeJS checks.
+        required: false
+        type: string
+        default: ubuntu-latest
+      aws-region:
+        description: AWS region for CodeArtifact authentication.
+        required: false
+        type: string
+        default: ap-southeast-2
+      aws-role-to-assume:
+        description: AWS role ARN used to access CodeArtifact.
+        required: false
+        type: string
+        default: arn:aws:iam::948396734470:role/github-actions-codeartifact-read
+      node-version:
+        description: Node.js version to install before running npm commands.
+        required: false
+        type: string
+        default: ''
+      working-directory:
+        description: Directory containing the NodeJS package.json.
+        required: false
+        type: string
+        default: .
+      install-command:
+        description: Dependency installation command.
+        required: false
+        type: string
+        default: npm install
+      lint-command:
+        description: Lint command.
+        required: false
+        type: string
+        default: npm run lint
+      coverage-command:
+        description: Unit test coverage command.
+        required: false
+        type: string
+        default: npm run coverage
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  linting:
+    runs-on: ${{ inputs.runner }}
+    permissions:
+      contents: read
+      id-token: write
+    defaults:
+      run:
+        working-directory: ${{ inputs.working-directory }}
+    steps:
+      - uses: actions/checkout@v2
+      - uses: actions/setup-node@v4
+        if: ${{ inputs.node-version != '' }}
+        with:
+          node-version: ${{ inputs.node-version }}
+      - uses: aws-actions/configure-aws-credentials@v4
+        if: ${{ inputs.aws-role-to-assume != '' || vars.AWS_CODEARTIFACT_READ_ROLE_ARN != '' }}
+        with:
+          role-to-assume: ${{ inputs.aws-role-to-assume || vars.AWS_CODEARTIFACT_READ_ROLE_ARN }}
+          aws-region: ${{ inputs.aws-region }}
+      - name: Export CodeArtifact token
+        run: |
+          CODEARTIFACT_AUTH_TOKEN=$(aws codeartifact get-authorization-token --domain quotable-value --domain-owner 948396734470 --region "${{ inputs.aws-region }}" --query authorizationToken --output text)
+          echo "::add-mask::$CODEARTIFACT_AUTH_TOKEN"
+          echo "CODEARTIFACT_AUTH_TOKEN=$CODEARTIFACT_AUTH_TOKEN" >> "$GITHUB_ENV"
+      - name: Install dependencies
+        run: ${{ inputs.install-command }}
+      - name: Run linting
+        run: ${{ inputs.lint-command }}
+
+  unit:
+    runs-on: ${{ inputs.runner }}
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      ENV: local
+    defaults:
+      run:
+        working-directory: ${{ inputs.working-directory }}
+    steps:
+      - uses: actions/checkout@v2
+      - uses: actions/setup-node@v4
+        if: ${{ inputs.node-version != '' }}
+        with:
+          node-version: ${{ inputs.node-version }}
+      - uses: aws-actions/configure-aws-credentials@v4
+        if: ${{ inputs.aws-role-to-assume != '' || vars.AWS_CODEARTIFACT_READ_ROLE_ARN != '' }}
+        with:
+          role-to-assume: ${{ inputs.aws-role-to-assume || vars.AWS_CODEARTIFACT_READ_ROLE_ARN }}
+          aws-region: ${{ inputs.aws-region }}
+      - name: Export CodeArtifact token
+        run: |
+          CODEARTIFACT_AUTH_TOKEN=$(aws codeartifact get-authorization-token --domain quotable-value --domain-owner 948396734470 --region "${{ inputs.aws-region }}" --query authorizationToken --output text)
+          echo "::add-mask::$CODEARTIFACT_AUTH_TOKEN"
+          echo "CODEARTIFACT_AUTH_TOKEN=$CODEARTIFACT_AUTH_TOKEN" >> "$GITHUB_ENV"
+      - name: Install dependencies
+        run: ${{ inputs.install-command }}
+      - name: Prepare local test config
+        run: |
+          if [ ! -f config.json ] && [ -f config.sample.json ]; then cp config.sample.json config.json; fi
+          if [ ! -f test/config.json ] && [ -f test/config.sample.json ]; then cp test/config.sample.json test/config.json; fi
+      - name: Run unit tests with coverage
+        run: ${{ inputs.coverage-command }}
