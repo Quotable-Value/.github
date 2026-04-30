@@ -238,15 +238,21 @@ jobs:
           }
 
           if (rows.length > 0) {
+            const visibleRows = rows.slice(0, maxRows);
+            lines.push(`<details>`);
+            lines.push(`<summary>Show lint findings (${visibleRows.length} of ${rows.length})</summary>`);
+            lines.push('');
             lines.push('| Severity | File | Location | Rule | Message |');
             lines.push('| --- | --- | ---: | --- | --- |');
-            for (const row of rows.slice(0, maxRows)) {
+            for (const row of visibleRows) {
               lines.push(`| ${row.severity} | ${escapeCell(row.file)} | ${escapeCell(row.location)} | ${escapeCell(row.rule)} | ${truncate(row.message)} |`);
             }
             if (rows.length > maxRows) {
               lines.push('');
               lines.push(`Showing first ${maxRows} of ${rows.length} lint findings. Full JSON is available in the lint artifact.`);
             }
+            lines.push('');
+            lines.push('</details>');
           }
 
           lines.push('');
