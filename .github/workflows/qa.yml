@@ -47,7 +47,7 @@ on:
         description: Command that writes ESLint JSON to $ESLINT_JSON_OUTPUT for PR comments.
         required: false
         type: string
-        default: npm run lint -- --format json --output-file "$ESLINT_JSON_OUTPUT"
+        default: npm run ci:lint:json
       coverage-command:
         description: Unit test coverage command.
         required: false
