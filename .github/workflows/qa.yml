@@ -18,11 +18,16 @@ on:
         required: false
         type: string
         default: arn:aws:iam::948396734470:role/github-actions-codeartifact-read
+      ecr-login:
+        description: Log in to Amazon ECR before running unit test coverage.
+        required: false
+        type: boolean
+        default: false
       node-version:
         description: Node.js version to install before running npm commands.
         required: false
         type: string
-        default: ''
+        default: '24'
       working-directory:
         description: Directory containing the NodeJS package.json.
         required: false
@@ -38,6 +43,11 @@ on:
         required: false
         type: string
         default: npm run lint
+      lint-json-command:
+        description: Command that writes ESLint JSON to $ESLINT_JSON_OUTPUT for PR comments.
+        required: false
+        type: string
+        default: npm run ci:lint:json
       coverage-command:
         description: Unit test coverage command.
         required: false
@@ -47,6 +57,8 @@ on:
 permissions:
   contents: read
   id-token: write
+  issues: write
+  pull-requests: write
 
 jobs:
   linting:
@@ -54,61 +66,427 @@ jobs:
     permissions:
       contents: read
       id-token: write
+      issues: write
+      pull-requests: write
     defaults:
       run:
         working-directory: ${{ inputs.working-directory }}
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v4
+
+      - name: Prepare report metadata
+        id: qa-meta
+        run: |
+          suffix='${{ inputs.working-directory }}'
+          if [ "$suffix" = "." ]; then suffix="root"; fi
+          suffix=$(printf '%s' "$suffix" | sed -E 's#[^A-Za-z0-9_.-]+#-#g')
+          echo "artifact_suffix=$suffix" >> "$GITHUB_OUTPUT"
+
+          cache_path='${{ inputs.working-directory }}/package-lock.json'
+          if [ "${{ inputs.working-directory }}" = "." ]; then cache_path="package-lock.json"; fi
+          echo "npm_cache_dependency_path=$cache_path" >> "$GITHUB_OUTPUT"
+          if [ -f "$cache_path" ]; then
+            echo "npm_cache_enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "npm_cache_enabled=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - uses: actions/setup-node@v4
-        if: ${{ inputs.node-version != '' }}
+        if: ${{ inputs.node-version != '' && steps.qa-meta.outputs.npm_cache_enabled == 'true' }}
         with:
           node-version: ${{ inputs.node-version }}
+          cache: npm
+          cache-dependency-path: ${{ steps.qa-meta.outputs.npm_cache_dependency_path }}
+
+      - uses: actions/setup-node@v4
+        if: ${{ inputs.node-version != '' && steps.qa-meta.outputs.npm_cache_enabled != 'true' }}
+        with:
+          node-version: ${{ inputs.node-version }}
+
       - uses: aws-actions/configure-aws-credentials@v4
         if: ${{ inputs.aws-role-to-assume != '' || vars.AWS_CODEARTIFACT_READ_ROLE_ARN != '' }}
         with:
           role-to-assume: ${{ inputs.aws-role-to-assume || vars.AWS_CODEARTIFACT_READ_ROLE_ARN }}
           aws-region: ${{ inputs.aws-region }}
+
       - name: Export CodeArtifact token
         run: |
           CODEARTIFACT_AUTH_TOKEN=$(aws codeartifact get-authorization-token --domain quotable-value --domain-owner 948396734470 --region "${{ inputs.aws-region }}" --query authorizationToken --output text)
           echo "::add-mask::$CODEARTIFACT_AUTH_TOKEN"
           echo "CODEARTIFACT_AUTH_TOKEN=$CODEARTIFACT_AUTH_TOKEN" >> "$GITHUB_ENV"
+
       - name: Install dependencies
+        id: install
         run: ${{ inputs.install-command }}
+
       - name: Run linting
-        run: ${{ inputs.lint-command }}
+        id: lint
+        shell: bash
+        run: |
+          set -o pipefail
+          {
+            ${{ inputs.lint-command }}
+          } 2>&1 | tee "$RUNNER_TEMP/nodejs-lint-${{ steps.qa-meta.outputs.artifact_suffix }}.log"
+
+      - name: Generate structured lint report
+        id: lint-json
+        if: ${{ always() && inputs.lint-json-command != '' }}
+        continue-on-error: true
+        env:
+          ESLINT_JSON_OUTPUT: ${{ runner.temp }}/nodejs-lint-${{ steps.qa-meta.outputs.artifact_suffix }}.json
+        run: |
+          echo "json_file=$ESLINT_JSON_OUTPUT" >> "$GITHUB_OUTPUT"
+          ${{ inputs.lint-json-command }}
+
+      - name: Write lint summary
+        id: lint-summary
+        if: ${{ always() }}
+        run: |
+          lint_log="$RUNNER_TEMP/nodejs-lint-${{ steps.qa-meta.outputs.artifact_suffix }}.log"
+          lint_json="$RUNNER_TEMP/nodejs-lint-${{ steps.qa-meta.outputs.artifact_suffix }}.json"
+          comment_file="$RUNNER_TEMP/nodejs-lint-${{ steps.qa-meta.outputs.artifact_suffix }}.md"
+          echo "comment_file=$comment_file" >> "$GITHUB_OUTPUT"
+          lint_problem_summary="No ESLint problems reported."
+          if [ -s "$lint_log" ]; then
+            lint_problem_summary=$(grep -E '[0-9]+ problems? \([0-9]+ errors?, [0-9]+ warnings?\)' "$lint_log" | tail -n 1 || true)
+            if [ -z "$lint_problem_summary" ]; then
+              lint_problem_summary="No ESLint problem summary was reported."
+            fi
+          fi
+
+          LINT_JSON_FILE="$lint_json" LINT_PROBLEM_SUMMARY="$lint_problem_summary" COMMENT_FILE="$comment_file" node <<'NODE'
+          const fs = require('fs');
+          const path = require('path');
+
+          const jsonFile = process.env.LINT_JSON_FILE;
+          const fallbackSummary = process.env.LINT_PROBLEM_SUMMARY || 'No ESLint problem summary was reported.';
+          const commentFile = process.env.COMMENT_FILE;
+
+          const escapeCell = (value) => String(value ?? '-')
+            .replace(/\r?\n/g, ' ')
+            .replace(/\|/g, '\\|')
+            .trim();
+
+          const truncate = (value, max = 160) => {
+            const text = escapeCell(value);
+            return text.length > max ? `${text.slice(0, max - 1)}...` : text;
+          };
+
+          const fallback = () => [
+            '### NodeJS lint report',
+            '',
+            '```text',
+            fallbackSummary,
+            '```',
+            '',
+          ].join('\n');
+
+          if (!jsonFile || !fs.existsSync(jsonFile) || fs.statSync(jsonFile).size === 0) {
+            fs.writeFileSync(commentFile, fallback());
+            process.exit(0);
+          }
+
+          let report;
+          try {
+            report = JSON.parse(fs.readFileSync(jsonFile, 'utf8'));
+          } catch {
+            fs.writeFileSync(commentFile, fallback());
+            process.exit(0);
+          }
+
+          const totals = report.reduce((acc, file) => {
+            acc.errors += file.errorCount || 0;
+            acc.warnings += file.warningCount || 0;
+            acc.fixableErrors += file.fixableErrorCount || 0;
+            acc.fixableWarnings += file.fixableWarningCount || 0;
+            if ((file.messages || []).length > 0) acc.files += 1;
+            return acc;
+          }, { errors: 0, warnings: 0, fixableErrors: 0, fixableWarnings: 0, files: 0 });
+
+          const problemCount = totals.errors + totals.warnings;
+          const problemWord = problemCount === 1 ? 'problem' : 'problems';
+          const errorWord = totals.errors === 1 ? 'error' : 'errors';
+          const warningWord = totals.warnings === 1 ? 'warning' : 'warnings';
+          const summary = problemCount === 0
+            ? 'No ESLint problems reported.'
+            : `${problemCount} ${problemWord} (${totals.errors} ${errorWord}, ${totals.warnings} ${warningWord})`;
+
+          const lines = [
+            '### NodeJS lint report',
+            '',
+            `**${summary}**`,
+            '',
+            '| Errors | Warnings | Files | Fixable |',
+            '| ---: | ---: | ---: | ---: |',
+            `| ${totals.errors} | ${totals.warnings} | ${totals.files} | ${totals.fixableErrors + totals.fixableWarnings} |`,
+            '',
+          ];
+
+          const rows = [];
+          const maxRows = 20;
+          for (const file of report) {
+            for (const message of file.messages || []) {
+              const filePath = file.filePath ? path.relative(process.cwd(), file.filePath) || file.filePath : '-';
+              rows.push({
+                severity: message.severity === 2 ? 'error' : 'warning',
+                file: filePath,
+                location: `${message.line || '-'}:${message.column || '-'}`,
+                rule: message.ruleId || '-',
+                message: message.message || '-',
+              });
+            }
+          }
+
+          if (rows.length > 0) {
+            const visibleRows = rows.slice(0, maxRows);
+            lines.push(`<details>`);
+            lines.push(`<summary>Show lint findings (${visibleRows.length} of ${rows.length})</summary>`);
+            lines.push('');
+            lines.push('| Severity | File | Location | Rule | Message |');
+            lines.push('| --- | --- | ---: | --- | --- |');
+            for (const row of visibleRows) {
+              lines.push(`| ${row.severity} | ${escapeCell(row.file)} | ${escapeCell(row.location)} | ${escapeCell(row.rule)} | ${truncate(row.message)} |`);
+            }
+            if (rows.length > maxRows) {
+              lines.push('');
+              lines.push(`Showing first ${maxRows} of ${rows.length} lint findings. Full JSON is available in the lint artifact.`);
+            }
+            lines.push('');
+            lines.push('</details>');
+          }
+
+          lines.push('');
+          fs.writeFileSync(commentFile, `${lines.join('\n')}\n`);
+          NODE
+
+          {
+            echo "### NodeJS linting"
+            echo ""
+            echo "- Working directory: \`${{ inputs.working-directory }}\`"
+            echo "- Install result: \`${{ steps.install.outcome || 'skipped' }}\`"
+            echo "- Lint result: \`${{ steps.lint.outcome || 'skipped' }}\`"
+            echo "- Structured lint report: \`${{ steps.lint-json.outcome || 'skipped' }}\`"
+            echo "- Problem summary: \`$lint_problem_summary\`"
+            echo ""
+            echo "Command:"
+            echo '```bash'
+            cat <<'COMMAND'
+          ${{ inputs.lint-command }}
+          COMMAND
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        if: ${{ always() }}
+        with:
+          name: nodejs-lint-${{ steps.qa-meta.outputs.artifact_suffix }}-report
+          if-no-files-found: ignore
+          path: |
+            ${{ runner.temp }}/nodejs-lint-${{ steps.qa-meta.outputs.artifact_suffix }}.log
+            ${{ runner.temp }}/nodejs-lint-${{ steps.qa-meta.outputs.artifact_suffix }}.json
+
+      - uses: actions/github-script@v7
+        if: ${{ always() && github.event_name == 'pull_request' }}
+        env:
+          COMMENT_FILE: ${{ steps.lint-summary.outputs.comment_file }}
+          COMMENT_MARKER: '<!-- qv-qa-summary:nodejs-lint:${{ steps.qa-meta.outputs.artifact_suffix }} -->'
+        with:
+          script: |
+            const fs = require('fs');
+            const marker = process.env.COMMENT_MARKER;
+            const body = `${marker}\n${fs.readFileSync(process.env.COMMENT_FILE, 'utf8')}`;
+            const { owner, repo } = context.repo;
+            const issue_number = context.payload.pull_request.number;
+            const { data: comments } = await github.rest.issues.listComments({ owner, repo, issue_number, per_page: 100 });
+            const existing = comments.find((comment) => comment.user.type === 'Bot' && comment.body?.includes(marker));
+            if (existing) {
+              await github.rest.issues.updateComment({ owner, repo, comment_id: existing.id, body });
+            } else {
+              await github.rest.issues.createComment({ owner, repo, issue_number, body });
+            }
 
   unit:
     runs-on: ${{ inputs.runner }}
     permissions:
       contents: read
       id-token: write
+      issues: write
+      pull-requests: write
     env:
       ENV: local
     defaults:
       run:
         working-directory: ${{ inputs.working-directory }}
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v4
+
+      - name: Prepare report metadata
+        id: qa-meta
+        run: |
+          suffix='${{ inputs.working-directory }}'
+          if [ "$suffix" = "." ]; then suffix="root"; fi
+          suffix=$(printf '%s' "$suffix" | sed -E 's#[^A-Za-z0-9_.-]+#-#g')
+          echo "artifact_suffix=$suffix" >> "$GITHUB_OUTPUT"
+
+          cache_path='${{ inputs.working-directory }}/package-lock.json'
+          if [ "${{ inputs.working-directory }}" = "." ]; then cache_path="package-lock.json"; fi
+          echo "npm_cache_dependency_path=$cache_path" >> "$GITHUB_OUTPUT"
+          if [ -f "$cache_path" ]; then
+            echo "npm_cache_enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "npm_cache_enabled=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - uses: actions/setup-node@v4
-        if: ${{ inputs.node-version != '' }}
+        if: ${{ inputs.node-version != '' && steps.qa-meta.outputs.npm_cache_enabled == 'true' }}
         with:
           node-version: ${{ inputs.node-version }}
+          cache: npm
+          cache-dependency-path: ${{ steps.qa-meta.outputs.npm_cache_dependency_path }}
+
+      - uses: actions/setup-node@v4
+        if: ${{ inputs.node-version != '' && steps.qa-meta.outputs.npm_cache_enabled != 'true' }}
+        with:
+          node-version: ${{ inputs.node-version }}
+
       - uses: aws-actions/configure-aws-credentials@v4
         if: ${{ inputs.aws-role-to-assume != '' || vars.AWS_CODEARTIFACT_READ_ROLE_ARN != '' }}
         with:
           role-to-assume: ${{ inputs.aws-role-to-assume || vars.AWS_CODEARTIFACT_READ_ROLE_ARN }}
           aws-region: ${{ inputs.aws-region }}
+
       - name: Export CodeArtifact token
         run: |
           CODEARTIFACT_AUTH_TOKEN=$(aws codeartifact get-authorization-token --domain quotable-value --domain-owner 948396734470 --region "${{ inputs.aws-region }}" --query authorizationToken --output text)
           echo "::add-mask::$CODEARTIFACT_AUTH_TOKEN"
           echo "CODEARTIFACT_AUTH_TOKEN=$CODEARTIFACT_AUTH_TOKEN" >> "$GITHUB_ENV"
+
+      - name: Log in to Amazon ECR
+        if: ${{ inputs.ecr-login }}
+        run: |
+          aws ecr get-login-password --region "${{ inputs.aws-region }}" | docker login --username AWS --password-stdin "948396734470.dkr.ecr.${{ inputs.aws-region }}.amazonaws.com"
+
       - name: Install dependencies
+        id: install
         run: ${{ inputs.install-command }}
+
       - name: Prepare local test config
         run: |
           if [ ! -f config.json ] && [ -f config.sample.json ]; then cp config.sample.json config.json; fi
           if [ ! -f test/config.json ] && [ -f test/config.sample.json ]; then cp test/config.sample.json test/config.json; fi
+
       - name: Run unit tests with coverage
+        id: coverage
         run: ${{ inputs.coverage-command }}
+
+      - name: Write unit summary
+        id: unit-summary
+        if: ${{ always() }}
+        run: |
+          comment_file="$RUNNER_TEMP/nodejs-unit-${{ steps.qa-meta.outputs.artifact_suffix }}.md"
+          echo "comment_file=$comment_file" >> "$GITHUB_OUTPUT"
+
+          {
+            echo "### NodeJS unit"
+            echo ""
+            echo "- Working directory: \`${{ inputs.working-directory }}\`"
+            echo "- Install result: \`${{ steps.install.outcome || 'skipped' }}\`"
+            echo "- ECR login: \`${{ inputs.ecr-login }}\`"
+            echo "- Unit result: \`${{ steps.coverage.outcome || 'skipped' }}\`"
+            echo ""
+            echo "Command:"
+            echo '```bash'
+            cat <<'COMMAND'
+          ${{ inputs.coverage-command }}
+          COMMAND
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          COMMENT_FILE="$comment_file" node <<'NODE'
+          const fs = require('fs');
+          const path = require('path');
+
+          const sections = [];
+          const readJson = (file) => {
+            try {
+              return JSON.parse(fs.readFileSync(file, 'utf8'));
+            } catch {
+              return null;
+            }
+          };
+
+          const coverage = readJson(path.join('coverage', 'coverage-summary.json'));
+          if (coverage && coverage.total) {
+            const rows = ['statements', 'branches', 'functions', 'lines']
+              .filter((key) => coverage.total[key])
+              .map((key) => `| ${key} | ${coverage.total[key].pct ?? '-'}% | ${coverage.total[key].covered ?? '-'} | ${coverage.total[key].total ?? '-'} |`);
+            if (rows.length) {
+              sections.push([
+                '#### Coverage',
+                '',
+                '| Metric | Pct | Covered | Total |',
+                '| --- | ---: | ---: | ---: |',
+                ...rows,
+              ].join('\n'));
+            }
+          }
+
+          const mochawesome = readJson(path.join('mochawesome-report', 'mochawesome.json'));
+          if (mochawesome && mochawesome.stats) {
+            const stats = mochawesome.stats;
+            sections.push([
+              '#### Mocha',
+              '',
+              '| Tests | Passes | Failures | Pending | Duration |',
+              '| ---: | ---: | ---: | ---: | ---: |',
+              `| ${stats.tests ?? '-'} | ${stats.passes ?? '-'} | ${stats.failures ?? '-'} | ${stats.pending ?? '-'} | ${stats.duration ?? '-'}ms |`,
+            ].join('\n'));
+          }
+
+          if (sections.length) {
+            fs.writeFileSync(
+              process.env.COMMENT_FILE,
+              ['### NodeJS unit report', '', ...sections].join('\n\n') + '\n',
+            );
+          }
+          NODE
+
+          if [ -s "$comment_file" ]; then
+            cat "$comment_file" >> "$GITHUB_STEP_SUMMARY"
+            echo "has_structured_summary=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "" >> "$GITHUB_STEP_SUMMARY"
+            echo "No structured test report was found." >> "$GITHUB_STEP_SUMMARY"
+            echo "has_structured_summary=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/upload-artifact@v4
+        if: ${{ always() }}
+        with:
+          name: nodejs-unit-${{ steps.qa-meta.outputs.artifact_suffix }}-reports
+          if-no-files-found: ignore
+          path: |
+            ${{ inputs.working-directory }}/coverage/**
+            ${{ inputs.working-directory }}/mochawesome-report/**
+            ${{ inputs.working-directory }}/test-results/**
+            ${{ inputs.working-directory }}/junit*.xml
+
+      - uses: actions/github-script@v7
+        if: ${{ always() && github.event_name == 'pull_request' && steps.unit-summary.outputs.has_structured_summary == 'true' }}
+        env:
+          COMMENT_FILE: ${{ steps.unit-summary.outputs.comment_file }}
+          COMMENT_MARKER: '<!-- qv-qa-summary:nodejs-unit:${{ steps.qa-meta.outputs.artifact_suffix }} -->'
+        with:
+          script: |
+            const fs = require('fs');
+            const marker = process.env.COMMENT_MARKER;
+            const body = `${marker}\n${fs.readFileSync(process.env.COMMENT_FILE, 'utf8')}`;
+            const { owner, repo } = context.repo;
+            const issue_number = context.payload.pull_request.number;
+            const { data: comments } = await github.rest.issues.listComments({ owner, repo, issue_number, per_page: 100 });
+            const existing = comments.find((comment) => comment.user.type === 'Bot' && comment.body?.includes(marker));
+            if (existing) {
+              await github.rest.issues.updateComment({ owner, repo, comment_id: existing.id, body });
+            } else {
+              await github.rest.issues.createComment({ owner, repo, issue_number, body });
+            }
