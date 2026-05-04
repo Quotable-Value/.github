@@ -68,12 +68,6 @@ on:
         required: false
         type: string
         default: npm run coverage
-      build-command:
-        description: Optional build command. Leave empty to skip the build job.
-        required: false
-        type: string
-        default: ''
-
 permissions:
   contents: read
   id-token: write
@@ -577,58 +571,3 @@ jobs:
             } else {
               await github.rest.issues.createComment({ owner, repo, issue_number, body });
             }
-
-  build:
-    if: ${{ inputs.build-command != '' }}
-    runs-on: ${{ inputs.codebuild-project-name != '' && format('codebuild-{0}-{1}-{2}', inputs.codebuild-project-name, github.run_id, github.run_attempt) || inputs.runner }}
-    permissions:
-      contents: read
-      id-token: write
-    defaults:
-      run:
-        working-directory: ${{ inputs.working-directory }}
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Prepare report metadata
-        id: qa-meta
-        run: |
-          cache_path='${{ inputs.working-directory }}/package-lock.json'
-          if [ "${{ inputs.working-directory }}" = "." ]; then cache_path="package-lock.json"; fi
-          echo "npm_cache_dependency_path=$cache_path" >> "$GITHUB_OUTPUT"
-          if [ -f "$cache_path" ]; then
-            echo "npm_cache_enabled=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "npm_cache_enabled=false" >> "$GITHUB_OUTPUT"
-          fi
-
-      - uses: actions/setup-node@v4
-        if: ${{ inputs.node-version != '' && steps.qa-meta.outputs.npm_cache_enabled == 'true' }}
-        with:
-          node-version: ${{ inputs.node-version }}
-          cache: npm
-          cache-dependency-path: ${{ steps.qa-meta.outputs.npm_cache_dependency_path }}
-
-      - uses: actions/setup-node@v4
-        if: ${{ inputs.node-version != '' && steps.qa-meta.outputs.npm_cache_enabled != 'true' }}
-        with:
-          node-version: ${{ inputs.node-version }}
-
-      - uses: aws-actions/configure-aws-credentials@v4
-        if: ${{ inputs.codeartifact-auth && (inputs.aws-role-to-assume != '' || vars.AWS_CODEARTIFACT_READ_ROLE_ARN != '') }}
-        with:
-          role-to-assume: ${{ inputs.aws-role-to-assume || vars.AWS_CODEARTIFACT_READ_ROLE_ARN }}
-          aws-region: ${{ inputs.aws-region }}
-
-      - name: Export CodeArtifact token
-        if: ${{ inputs.codeartifact-auth }}
-        run: |
-          CODEARTIFACT_AUTH_TOKEN=$(aws codeartifact get-authorization-token --domain quotable-value --domain-owner 948396734470 --region "${{ inputs.aws-region }}" --query authorizationToken --output text)
-          echo "::add-mask::$CODEARTIFACT_AUTH_TOKEN"
-          echo "CODEARTIFACT_AUTH_TOKEN=$CODEARTIFACT_AUTH_TOKEN" >> "$GITHUB_ENV"
-
-      - name: Install dependencies
-        run: ${{ inputs.install-command }}
-
-      - name: Run build
-        run: ${{ inputs.build-command }}
