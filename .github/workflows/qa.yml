@@ -23,11 +23,21 @@ on:
         required: false
         type: string
         default: arn:aws:iam::948396734470:role/github-actions-codeartifact-read
+      codeartifact-auth:
+        description: Configure AWS credentials and export a CodeArtifact token before npm commands.
+        required: false
+        type: boolean
+        default: true
       ecr-login:
         description: Log in to Amazon ECR before running unit test coverage.
         required: false
         type: boolean
         default: false
+      prepare-local-test-config:
+        description: Copy config.sample.json files before running unit test coverage.
+        required: false
+        type: boolean
+        default: true
       node-version:
         description: Node.js version to install before running npm commands.
         required: false
@@ -58,6 +68,11 @@ on:
         required: false
         type: string
         default: npm run coverage
+      build-command:
+        description: Optional build command. Leave empty to skip the build job.
+        required: false
+        type: string
+        default: ''
 
 permissions:
   contents: read
@@ -109,12 +124,13 @@ jobs:
           node-version: ${{ inputs.node-version }}
 
       - uses: aws-actions/configure-aws-credentials@v4
-        if: ${{ inputs.aws-role-to-assume != '' || vars.AWS_CODEARTIFACT_READ_ROLE_ARN != '' }}
+        if: ${{ inputs.codeartifact-auth && (inputs.aws-role-to-assume != '' || vars.AWS_CODEARTIFACT_READ_ROLE_ARN != '') }}
         with:
           role-to-assume: ${{ inputs.aws-role-to-assume || vars.AWS_CODEARTIFACT_READ_ROLE_ARN }}
           aws-region: ${{ inputs.aws-region }}
 
       - name: Export CodeArtifact token
+        if: ${{ inputs.codeartifact-auth }}
         run: |
           CODEARTIFACT_AUTH_TOKEN=$(aws codeartifact get-authorization-token --domain quotable-value --domain-owner 948396734470 --region "${{ inputs.aws-region }}" --query authorizationToken --output text)
           echo "::add-mask::$CODEARTIFACT_AUTH_TOKEN"
@@ -355,12 +371,13 @@ jobs:
           node-version: ${{ inputs.node-version }}
 
       - uses: aws-actions/configure-aws-credentials@v4
-        if: ${{ inputs.aws-role-to-assume != '' || vars.AWS_CODEARTIFACT_READ_ROLE_ARN != '' }}
+        if: ${{ inputs.codeartifact-auth && (inputs.aws-role-to-assume != '' || vars.AWS_CODEARTIFACT_READ_ROLE_ARN != '') }}
         with:
           role-to-assume: ${{ inputs.aws-role-to-assume || vars.AWS_CODEARTIFACT_READ_ROLE_ARN }}
           aws-region: ${{ inputs.aws-region }}
 
       - name: Export CodeArtifact token
+        if: ${{ inputs.codeartifact-auth }}
         run: |
           CODEARTIFACT_AUTH_TOKEN=$(aws codeartifact get-authorization-token --domain quotable-value --domain-owner 948396734470 --region "${{ inputs.aws-region }}" --query authorizationToken --output text)
           echo "::add-mask::$CODEARTIFACT_AUTH_TOKEN"
@@ -376,6 +393,7 @@ jobs:
         run: ${{ inputs.install-command }}
 
       - name: Prepare local test config
+        if: ${{ inputs.prepare-local-test-config }}
         run: |
           if [ ! -f config.json ] && [ -f config.sample.json ]; then cp config.sample.json config.json; fi
           if [ ! -f test/config.json ] && [ -f test/config.sample.json ]; then cp test/config.sample.json test/config.json; fi
@@ -411,7 +429,6 @@ jobs:
           const fs = require('fs');
           const path = require('path');
 
-          const sections = [];
           const readJson = (file) => {
             try {
               return JSON.parse(fs.readFileSync(file, 'utf8'));
@@ -420,7 +437,72 @@ jobs:
             }
           };
 
-          const coverage = readJson(path.join('coverage', 'coverage-summary.json'));
+          const summarizeCoverageFinal = (report) => {
+            const metrics = {
+              statements: { total: 0, covered: 0 },
+              branches: { total: 0, covered: 0 },
+              functions: { total: 0, covered: 0 },
+              lines: { total: 0, covered: 0 },
+            };
+
+            for (const fileCoverage of Object.values(report || {})) {
+              const statements = fileCoverage.s || {};
+              metrics.statements.total += Object.keys(statements).length;
+              metrics.statements.covered += Object.values(statements).filter((count) => count > 0).length;
+
+              const functions = fileCoverage.f || {};
+              metrics.functions.total += Object.keys(functions).length;
+              metrics.functions.covered += Object.values(functions).filter((count) => count > 0).length;
+
+              for (const branchCounts of Object.values(fileCoverage.b || {})) {
+                for (const count of branchCounts || []) {
+                  metrics.branches.total += 1;
+                  if (count > 0) metrics.branches.covered += 1;
+                }
+              }
+
+              const totalLines = new Set();
+              const coveredLines = new Set();
+              for (const [statementId, location] of Object.entries(fileCoverage.statementMap || {})) {
+                const line = location?.start?.line;
+                if (!line) continue;
+                totalLines.add(line);
+                if ((statements[statementId] || 0) > 0) coveredLines.add(line);
+              }
+              metrics.lines.total += totalLines.size;
+              metrics.lines.covered += coveredLines.size;
+            }
+
+            const toSummary = ({ total, covered }) => ({
+              total,
+              covered,
+              skipped: 0,
+              pct: total === 0 ? 100 : Math.round((covered / total) * 10000) / 100,
+            });
+
+            return {
+              total: Object.fromEntries(
+                Object.entries(metrics).map(([name, metric]) => [name, toSummary(metric)]),
+              ),
+            };
+          };
+
+          const coverageFromFinal = () => {
+            const finalCoverage = readJson(path.join('coverage', 'coverage-final.json'));
+            if (!finalCoverage) return null;
+
+            try {
+              const libCoverage = require('istanbul-lib-coverage');
+              return {
+                total: libCoverage.createCoverageMap(finalCoverage).getCoverageSummary().toJSON(),
+              };
+            } catch {
+              return summarizeCoverageFinal(finalCoverage);
+            }
+          };
+
+          const sections = [];
+          const coverage = readJson(path.join('coverage', 'coverage-summary.json')) || coverageFromFinal();
           if (coverage && coverage.total) {
             const rows = ['statements', 'branches', 'functions', 'lines']
               .filter((key) => coverage.total[key])
@@ -495,3 +577,58 @@ jobs:
             } else {
               await github.rest.issues.createComment({ owner, repo, issue_number, body });
             }
+
+  build:
+    if: ${{ inputs.build-command != '' }}
+    runs-on: ${{ inputs.codebuild-project-name != '' && format('codebuild-{0}-{1}-{2}', inputs.codebuild-project-name, github.run_id, github.run_attempt) || inputs.runner }}
+    permissions:
+      contents: read
+      id-token: write
+    defaults:
+      run:
+        working-directory: ${{ inputs.working-directory }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Prepare report metadata
+        id: qa-meta
+        run: |
+          cache_path='${{ inputs.working-directory }}/package-lock.json'
+          if [ "${{ inputs.working-directory }}" = "." ]; then cache_path="package-lock.json"; fi
+          echo "npm_cache_dependency_path=$cache_path" >> "$GITHUB_OUTPUT"
+          if [ -f "$cache_path" ]; then
+            echo "npm_cache_enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "npm_cache_enabled=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/setup-node@v4
+        if: ${{ inputs.node-version != '' && steps.qa-meta.outputs.npm_cache_enabled == 'true' }}
+        with:
+          node-version: ${{ inputs.node-version }}
+          cache: npm
+          cache-dependency-path: ${{ steps.qa-meta.outputs.npm_cache_dependency_path }}
+
+      - uses: actions/setup-node@v4
+        if: ${{ inputs.node-version != '' && steps.qa-meta.outputs.npm_cache_enabled != 'true' }}
+        with:
+          node-version: ${{ inputs.node-version }}
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        if: ${{ inputs.codeartifact-auth && (inputs.aws-role-to-assume != '' || vars.AWS_CODEARTIFACT_READ_ROLE_ARN != '') }}
+        with:
+          role-to-assume: ${{ inputs.aws-role-to-assume || vars.AWS_CODEARTIFACT_READ_ROLE_ARN }}
+          aws-region: ${{ inputs.aws-region }}
+
+      - name: Export CodeArtifact token
+        if: ${{ inputs.codeartifact-auth }}
+        run: |
+          CODEARTIFACT_AUTH_TOKEN=$(aws codeartifact get-authorization-token --domain quotable-value --domain-owner 948396734470 --region "${{ inputs.aws-region }}" --query authorizationToken --output text)
+          echo "::add-mask::$CODEARTIFACT_AUTH_TOKEN"
+          echo "CODEARTIFACT_AUTH_TOKEN=$CODEARTIFACT_AUTH_TOKEN" >> "$GITHUB_ENV"
+
+      - name: Install dependencies
+        run: ${{ inputs.install-command }}
+
+      - name: Run build
+        run: ${{ inputs.build-command }}
