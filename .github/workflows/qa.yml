@@ -431,72 +431,8 @@ jobs:
             }
           };
 
-          const summarizeCoverageFinal = (report) => {
-            const metrics = {
-              statements: { total: 0, covered: 0 },
-              branches: { total: 0, covered: 0 },
-              functions: { total: 0, covered: 0 },
-              lines: { total: 0, covered: 0 },
-            };
-
-            for (const fileCoverage of Object.values(report || {})) {
-              const statements = fileCoverage.s || {};
-              metrics.statements.total += Object.keys(statements).length;
-              metrics.statements.covered += Object.values(statements).filter((count) => count > 0).length;
-
-              const functions = fileCoverage.f || {};
-              metrics.functions.total += Object.keys(functions).length;
-              metrics.functions.covered += Object.values(functions).filter((count) => count > 0).length;
-
-              for (const branchCounts of Object.values(fileCoverage.b || {})) {
-                for (const count of branchCounts || []) {
-                  metrics.branches.total += 1;
-                  if (count > 0) metrics.branches.covered += 1;
-                }
-              }
-
-              const totalLines = new Set();
-              const coveredLines = new Set();
-              for (const [statementId, location] of Object.entries(fileCoverage.statementMap || {})) {
-                const line = location?.start?.line;
-                if (!line) continue;
-                totalLines.add(line);
-                if ((statements[statementId] || 0) > 0) coveredLines.add(line);
-              }
-              metrics.lines.total += totalLines.size;
-              metrics.lines.covered += coveredLines.size;
-            }
-
-            const toSummary = ({ total, covered }) => ({
-              total,
-              covered,
-              skipped: 0,
-              pct: total === 0 ? 100 : Math.round((covered / total) * 10000) / 100,
-            });
-
-            return {
-              total: Object.fromEntries(
-                Object.entries(metrics).map(([name, metric]) => [name, toSummary(metric)]),
-              ),
-            };
-          };
-
-          const coverageFromFinal = () => {
-            const finalCoverage = readJson(path.join('coverage', 'coverage-final.json'));
-            if (!finalCoverage) return null;
-
-            try {
-              const libCoverage = require('istanbul-lib-coverage');
-              return {
-                total: libCoverage.createCoverageMap(finalCoverage).getCoverageSummary().toJSON(),
-              };
-            } catch {
-              return summarizeCoverageFinal(finalCoverage);
-            }
-          };
-
           const sections = [];
-          const coverage = readJson(path.join('coverage', 'coverage-summary.json')) || coverageFromFinal();
+          const coverage = readJson(path.join('coverage', 'coverage-summary.json'));
           if (coverage && coverage.total) {
             const rows = ['statements', 'branches', 'functions', 'lines']
               .filter((key) => coverage.total[key])
