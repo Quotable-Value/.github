@@ -12,7 +12,7 @@ on:
         description: Node.js version to install before running npm commands.
         required: false
         type: string
-        default: '20'
+        default: '24'
       runner:
         description: Runner label to use for frontend checks.
         required: false
