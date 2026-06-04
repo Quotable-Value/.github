@@ -18,6 +18,21 @@ on:
         required: false
         type: string
         default: ubuntu-latest
+      codebuild-project-name:
+        description: CodeBuild project name used to build the runner label.
+        required: false
+        type: string
+        default: ''
+      aws-region:
+        description: AWS region for CodeArtifact authentication.
+        required: false
+        type: string
+        default: ap-southeast-2
+      aws-role-to-assume:
+        description: AWS role ARN used to access CodeArtifact.
+        required: false
+        type: string
+        default: arn:aws:iam::948396734470:role/github-actions-codeartifact-read
       coverage-command:
         description: SBT coverage command.
         required: false
@@ -31,10 +46,14 @@ on:
 
 permissions:
   contents: read
+  id-token: write
 
 jobs:
   coverage:
-    runs-on: ${{ inputs.runner }}
+    runs-on: ${{ inputs.codebuild-project-name != '' && format('codebuild-{0}-{1}-{2}', inputs.codebuild-project-name, github.run_id, github.run_attempt) || inputs.runner }}
+    permissions:
+      contents: read
+      id-token: write
     defaults:
       run:
         working-directory: ${{ inputs.working-directory }}
@@ -48,6 +67,17 @@ jobs:
           java-version: ${{ inputs.java-version }}
           cache: sbt
       - uses: sbt/setup-sbt@v1
+      - uses: aws-actions/configure-aws-credentials@v4
+        if: ${{ inputs.aws-role-to-assume != '' || vars.AWS_CODEARTIFACT_READ_ROLE_ARN != '' }}
+        with:
+          role-to-assume: ${{ inputs.aws-role-to-assume || vars.AWS_CODEARTIFACT_READ_ROLE_ARN }}
+          aws-region: ${{ inputs.aws-region }}
+      - name: Export CodeArtifact token
+        if: ${{ inputs.aws-role-to-assume != '' || vars.AWS_CODEARTIFACT_READ_ROLE_ARN != '' }}
+        run: |
+          CODEARTIFACT_TOKEN=$(aws codeartifact get-authorization-token --domain quotable-value --domain-owner 948396734470 --region "${{ inputs.aws-region }}" --query authorizationToken --output text)
+          echo "::add-mask::$CODEARTIFACT_TOKEN"
+          echo "CODEARTIFACT_TOKEN=$CODEARTIFACT_TOKEN" >> "$GITHUB_ENV"
       - name: Fetch tags
         run: git fetch --tags --force
       - name: Run SBT coverage
@@ -55,7 +85,10 @@ jobs:
 
   kubernetes-package:
     if: ${{ inputs.package-command != '' }}
-    runs-on: ${{ inputs.runner }}
+    runs-on: ${{ inputs.codebuild-project-name != '' && format('codebuild-{0}-{1}-{2}', inputs.codebuild-project-name, github.run_id, github.run_attempt) || inputs.runner }}
+    permissions:
+      contents: read
+      id-token: write
     defaults:
       run:
         working-directory: ${{ inputs.working-directory }}
@@ -69,6 +102,17 @@ jobs:
           java-version: ${{ inputs.java-version }}
           cache: sbt
       - uses: sbt/setup-sbt@v1
+      - uses: aws-actions/configure-aws-credentials@v4
+        if: ${{ inputs.aws-role-to-assume != '' || vars.AWS_CODEARTIFACT_READ_ROLE_ARN != '' }}
+        with:
+          role-to-assume: ${{ inputs.aws-role-to-assume || vars.AWS_CODEARTIFACT_READ_ROLE_ARN }}
+          aws-region: ${{ inputs.aws-region }}
+      - name: Export CodeArtifact token
+        if: ${{ inputs.aws-role-to-assume != '' || vars.AWS_CODEARTIFACT_READ_ROLE_ARN != '' }}
+        run: |
+          CODEARTIFACT_TOKEN=$(aws codeartifact get-authorization-token --domain quotable-value --domain-owner 948396734470 --region "${{ inputs.aws-region }}" --query authorizationToken --output text)
+          echo "::add-mask::$CODEARTIFACT_TOKEN"
+          echo "CODEARTIFACT_TOKEN=$CODEARTIFACT_TOKEN" >> "$GITHUB_ENV"
       - name: Fetch tags
         run: git fetch --tags --force
       - name: Verify Kubernetes package
