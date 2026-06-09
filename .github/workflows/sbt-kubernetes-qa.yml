@@ -18,11 +18,6 @@ on:
         required: false
         type: string
         default: ubuntu-latest
-      codebuild-project-name:
-        description: CodeBuild project name used to build the runner label.
-        required: false
-        type: string
-        default: ''
       aws-region:
         description: AWS region for CodeArtifact authentication.
         required: false
@@ -38,11 +33,6 @@ on:
         required: false
         type: string
         default: sbt jacoco
-      package-command:
-        description: Deprecated. Kubernetes package verification is no longer run by this workflow.
-        required: false
-        type: string
-        default: ''
       jacoco-report-directory:
         description: Directory containing the Jacoco report, relative to working-directory. Leave empty to skip PR comments.
         required: false
@@ -62,7 +52,7 @@ permissions:
 
 jobs:
   coverage:
-    runs-on: ${{ inputs.codebuild-project-name != '' && format('codebuild-{0}-{1}-{2}', inputs.codebuild-project-name, github.run_id, github.run_attempt) || inputs.runner }}
+    runs-on: ${{ inputs.runner }}
     permissions:
       contents: read
       id-token: write
