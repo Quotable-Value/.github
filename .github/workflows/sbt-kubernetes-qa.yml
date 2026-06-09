@@ -18,6 +18,11 @@ on:
         required: false
         type: string
         default: ubuntu-latest
+      codebuild-project-name:
+        description: CodeBuild project name used to build the runner label.
+        required: false
+        type: string
+        default: ''
       aws-region:
         description: AWS region for CodeArtifact authentication.
         required: false
@@ -52,7 +57,7 @@ permissions:
 
 jobs:
   coverage:
-    runs-on: ${{ inputs.runner }}
+    runs-on: ${{ inputs.codebuild-project-name != '' && format('codebuild-{0}-{1}-{2}', inputs.codebuild-project-name, github.run_id, github.run_attempt) || inputs.runner }}
     permissions:
       contents: read
       id-token: write
