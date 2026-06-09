@@ -96,9 +96,10 @@ jobs:
       - name: Export CodeArtifact token
         if: ${{ inputs.aws-role-to-assume != '' || vars.AWS_CODEARTIFACT_READ_ROLE_ARN != '' }}
         run: |
-          CODEARTIFACT_TOKEN=$(aws codeartifact get-authorization-token --domain quotable-value --domain-owner 948396734470 --region "${{ inputs.aws-region }}" --query authorizationToken --output text)
-          echo "::add-mask::$CODEARTIFACT_TOKEN"
-          echo "CODEARTIFACT_TOKEN=$CODEARTIFACT_TOKEN" >> "$GITHUB_ENV"
+          CODEARTIFACT_AUTH_TOKEN=$(aws codeartifact get-authorization-token --domain quotable-value --domain-owner 948396734470 --region "${{ inputs.aws-region }}" --query authorizationToken --output text)
+          echo "::add-mask::$CODEARTIFACT_AUTH_TOKEN"
+          echo "CODEARTIFACT_AUTH_TOKEN=$CODEARTIFACT_AUTH_TOKEN" >> "$GITHUB_ENV"
+          echo "CODEARTIFACT_TOKEN=$CODEARTIFACT_AUTH_TOKEN" >> "$GITHUB_ENV"
       - name: Fetch tags
         run: git fetch --tags --force
       - name: Run SBT coverage
@@ -178,9 +179,10 @@ jobs:
       - name: Export CodeArtifact token
         if: ${{ inputs.aws-role-to-assume != '' || vars.AWS_CODEARTIFACT_READ_ROLE_ARN != '' }}
         run: |
-          CODEARTIFACT_TOKEN=$(aws codeartifact get-authorization-token --domain quotable-value --domain-owner 948396734470 --region "${{ inputs.aws-region }}" --query authorizationToken --output text)
-          echo "::add-mask::$CODEARTIFACT_TOKEN"
-          echo "CODEARTIFACT_TOKEN=$CODEARTIFACT_TOKEN" >> "$GITHUB_ENV"
+          CODEARTIFACT_AUTH_TOKEN=$(aws codeartifact get-authorization-token --domain quotable-value --domain-owner 948396734470 --region "${{ inputs.aws-region }}" --query authorizationToken --output text)
+          echo "::add-mask::$CODEARTIFACT_AUTH_TOKEN"
+          echo "CODEARTIFACT_AUTH_TOKEN=$CODEARTIFACT_AUTH_TOKEN" >> "$GITHUB_ENV"
+          echo "CODEARTIFACT_TOKEN=$CODEARTIFACT_AUTH_TOKEN" >> "$GITHUB_ENV"
       - name: Fetch tags
         run: git fetch --tags --force
       - name: Verify Kubernetes package
