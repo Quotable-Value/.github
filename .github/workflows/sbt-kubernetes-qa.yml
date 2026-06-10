@@ -75,6 +75,12 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+      - name: Checkout shared QA scripts
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: .qv-shared-workflows
       - name: Prepare report metadata
         id: qa-meta
         run: |
@@ -92,16 +98,13 @@ jobs:
           path: |
             ~/.cache/coursier
             ~/.ivy2/cache
-            ~/.sbt
+            ~/.sbt/boot
           key: ${{ runner.os }}-sbt-${{ github.event.repository.name }}-${{ hashFiles('**/build.sbt', '**/project/*.sbt', '**/project/build.properties') }}
           restore-keys: |
             ${{ runner.os }}-sbt-${{ github.event.repository.name }}-
             ${{ runner.os }}-sbt-
       - name: Clean restored SBT cache locks
-        run: |
-          rm -fv ~/.ivy2/.sbt.ivy.lock
-          find ~/.ivy2/cache -name "ivydata-*.properties" -delete 2>/dev/null || true
-          find ~/.sbt -name "*.lock" -delete 2>/dev/null || true
+        run: bash "$GITHUB_WORKSPACE/.qv-shared-workflows/.github/scripts/clean-sbt-cache-locks.sh"
       - uses: sbt/setup-sbt@v1
       - uses: aws-actions/configure-aws-credentials@v4
         if: ${{ inputs.aws-role-to-assume != '' || vars.AWS_CODEARTIFACT_READ_ROLE_ARN != '' }}
@@ -124,20 +127,10 @@ jobs:
           COVERAGE_TIMEOUT_MINUTES: ${{ inputs.coverage-timeout-minutes }}
           COURSIER_PROGRESS: "false"
           SBT_OPTS: "-Dsbt.log.noformat=true"
-        run: timeout "${COVERAGE_TIMEOUT_MINUTES}m" bash -lc "$COVERAGE_COMMAND"
+        run: bash "$GITHUB_WORKSPACE/.qv-shared-workflows/.github/scripts/run-sbt-coverage.sh"
       - name: Clean SBT cache locks
         if: ${{ always() }}
-        run: |
-          rm -fv ~/.ivy2/.sbt.ivy.lock
-          find ~/.ivy2/cache -name "ivydata-*.properties" -delete 2>/dev/null || true
-          find ~/.sbt -name "*.lock" -delete 2>/dev/null || true
-      - name: Checkout shared QA scripts
-        if: ${{ always() }}
-        uses: actions/checkout@v4
-        with:
-          repository: ${{ job.workflow_repository }}
-          ref: ${{ job.workflow_sha }}
-          path: .qv-shared-workflows
+        run: bash "$GITHUB_WORKSPACE/.qv-shared-workflows/.github/scripts/clean-sbt-cache-locks.sh"
       - name: Write Jacoco summary
         id: jacoco-summary
         if: ${{ always() }}
