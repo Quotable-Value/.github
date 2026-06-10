@@ -38,6 +38,11 @@ on:
         required: false
         type: string
         default: sbt jacoco
+      coverage-timeout-minutes:
+        description: Maximum minutes to wait for the SBT coverage command.
+        required: false
+        type: number
+        default: 20
       jacoco-report-directory:
         description: Directory containing the Jacoco report, relative to working-directory. Defaults to ${repository-name}-impl/target/scala-2.12/jacoco/report.
         required: false
@@ -81,7 +86,17 @@ jobs:
         with:
           distribution: corretto
           java-version: ${{ inputs.java-version }}
-          cache: sbt
+      - name: Cache SBT dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/coursier
+            ~/.ivy2/cache
+            ~/.sbt
+          key: ${{ runner.os }}-sbt-${{ github.event.repository.name }}-${{ hashFiles('**/build.sbt', '**/project/*.sbt', '**/project/build.properties') }}
+          restore-keys: |
+            ${{ runner.os }}-sbt-${{ github.event.repository.name }}-
+            ${{ runner.os }}-sbt-
       - uses: sbt/setup-sbt@v1
       - uses: aws-actions/configure-aws-credentials@v4
         if: ${{ inputs.aws-role-to-assume != '' || vars.AWS_CODEARTIFACT_READ_ROLE_ARN != '' }}
@@ -99,7 +114,16 @@ jobs:
         run: git fetch --tags --force
       - name: Run SBT coverage
         id: coverage
-        run: ${{ inputs.coverage-command }}
+        env:
+          COVERAGE_COMMAND: ${{ inputs.coverage-command }}
+          COVERAGE_TIMEOUT_MINUTES: ${{ inputs.coverage-timeout-minutes }}
+        run: timeout "${COVERAGE_TIMEOUT_MINUTES}m" bash -lc "$COVERAGE_COMMAND"
+      - name: Clean SBT cache locks
+        if: ${{ always() }}
+        run: |
+          rm -fv ~/.ivy2/.sbt.ivy.lock
+          find ~/.ivy2/cache -name "ivydata-*.properties" -delete 2>/dev/null || true
+          find ~/.sbt -name "*.lock" -delete 2>/dev/null || true
       - name: Checkout shared QA scripts
         if: ${{ always() }}
         uses: actions/checkout@v4
