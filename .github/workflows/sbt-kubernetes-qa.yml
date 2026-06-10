@@ -37,7 +37,7 @@ on:
         description: SBT coverage command.
         required: false
         type: string
-        default: sbt jacoco
+        default: sbt -batch -Dsbt.supershell=false -Dsbt.color=false jacoco
       coverage-timeout-minutes:
         description: Maximum minutes to wait for the SBT coverage command.
         required: false
@@ -122,6 +122,8 @@ jobs:
         env:
           COVERAGE_COMMAND: ${{ inputs.coverage-command }}
           COVERAGE_TIMEOUT_MINUTES: ${{ inputs.coverage-timeout-minutes }}
+          COURSIER_PROGRESS: "false"
+          SBT_OPTS: "-Dsbt.log.noformat=true"
         run: timeout "${COVERAGE_TIMEOUT_MINUTES}m" bash -lc "$COVERAGE_COMMAND"
       - name: Clean SBT cache locks
         if: ${{ always() }}
