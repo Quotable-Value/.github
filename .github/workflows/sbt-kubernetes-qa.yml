@@ -14,12 +14,12 @@ on:
         type: string
         default: '8'
       runner:
-        description: Runner label to use for SBT checks.
+        description: Runner label override for SBT checks. Leave empty to use CodeBuild.
         required: false
         type: string
-        default: ubuntu-latest
+        default: ''
       codebuild-project-name:
-        description: CodeBuild project name used to build the runner label.
+        description: CodeBuild project name used to build the runner label. Defaults to monarch-${repository-name}-build.
         required: false
         type: string
         default: ''
@@ -39,7 +39,7 @@ on:
         type: string
         default: sbt jacoco
       jacoco-report-directory:
-        description: Directory containing the Jacoco report, relative to working-directory. Leave empty to skip PR comments.
+        description: Directory containing the Jacoco report, relative to working-directory. Defaults to ${repository-name}-impl/target/scala-2.12/jacoco/report.
         required: false
         type: string
         default: ''
@@ -57,7 +57,7 @@ permissions:
 
 jobs:
   coverage:
-    runs-on: ${{ inputs.codebuild-project-name != '' && format('codebuild-{0}-{1}-{2}', inputs.codebuild-project-name, github.run_id, github.run_attempt) || inputs.runner }}
+    runs-on: ${{ inputs.runner != '' && inputs.runner || format('codebuild-{0}-{1}-{2}', inputs.codebuild-project-name != '' && inputs.codebuild-project-name || format('monarch-{0}-build', github.event.repository.name), github.run_id, github.run_attempt) }}
     permissions:
       contents: read
       id-token: write
@@ -101,7 +101,7 @@ jobs:
         id: coverage
         run: ${{ inputs.coverage-command }}
       - name: Checkout shared QA scripts
-        if: ${{ always() && inputs.jacoco-report-directory != '' }}
+        if: ${{ always() }}
         uses: actions/checkout@v4
         with:
           repository: ${{ job.workflow_repository }}
@@ -109,11 +109,11 @@ jobs:
           path: .qv-shared-workflows
       - name: Write Jacoco summary
         id: jacoco-summary
-        if: ${{ always() && inputs.jacoco-report-directory != '' }}
+        if: ${{ always() }}
         env:
           COMMENT_FILE: ${{ runner.temp }}/sbt-jacoco-${{ steps.qa-meta.outputs.artifact_suffix }}.md
           JACOCO_PACKAGE_ROW_LIMIT: ${{ inputs.jacoco-package-row-limit }}
-          JACOCO_REPORT_DIRECTORY: ${{ inputs.jacoco-report-directory }}
+          JACOCO_REPORT_DIRECTORY: ${{ inputs.jacoco-report-directory != '' && inputs.jacoco-report-directory || format('{0}-impl/target/scala-2.12/jacoco/report', github.event.repository.name) }}
         run: bash "$GITHUB_WORKSPACE/.qv-shared-workflows/.github/scripts/write-sbt-jacoco-summary.sh"
       - uses: actions/github-script@v7
         if: ${{ always() && github.event_name == 'pull_request' && steps.jacoco-summary.outputs.has_structured_summary == 'true' }}
