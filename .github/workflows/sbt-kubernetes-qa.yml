@@ -42,7 +42,7 @@ on:
         description: Maximum minutes to wait for the SBT coverage command.
         required: false
         type: number
-        default: 20
+        default: 30
       jacoco-report-directory:
         description: Directory containing the Jacoco report, relative to working-directory. Defaults to ${repository-name}-impl/target/scala-2.12/jacoco/report.
         required: false
@@ -98,7 +98,7 @@ jobs:
           path: |
             ~/.cache/coursier
             ~/.ivy2/cache
-            ~/.sbt/boot
+            ~/.sbt
           key: ${{ runner.os }}-sbt-${{ github.event.repository.name }}-${{ hashFiles('**/build.sbt', '**/project/*.sbt', '**/project/build.properties') }}
           restore-keys: |
             ${{ runner.os }}-sbt-${{ github.event.repository.name }}-
