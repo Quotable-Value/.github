@@ -100,14 +100,6 @@ jobs:
       - name: Run SBT coverage
         id: coverage
         run: ${{ inputs.coverage-command }}
-      - name: Upload Jacoco HTML report
-        id: jacoco-artifact
-        if: ${{ always() && inputs.jacoco-report-directory != '' }}
-        uses: actions/upload-artifact@v4
-        with:
-          name: sbt-jacoco-${{ steps.qa-meta.outputs.artifact_suffix }}-html-report
-          if-no-files-found: ignore
-          path: ${{ inputs.working-directory }}/${{ inputs.jacoco-report-directory }}/html/**
       - name: Checkout shared QA scripts
         if: ${{ always() && inputs.jacoco-report-directory != '' }}
         uses: actions/checkout@v4
@@ -119,13 +111,9 @@ jobs:
         id: jacoco-summary
         if: ${{ always() && inputs.jacoco-report-directory != '' }}
         env:
-          ARTIFACT_URL: ${{ steps.jacoco-artifact.outputs.artifact-url }}
           COMMENT_FILE: ${{ runner.temp }}/sbt-jacoco-${{ steps.qa-meta.outputs.artifact_suffix }}.md
-          COVERAGE_COMMAND: ${{ inputs.coverage-command }}
-          COVERAGE_RESULT: ${{ steps.coverage.outcome || 'skipped' }}
           JACOCO_PACKAGE_ROW_LIMIT: ${{ inputs.jacoco-package-row-limit }}
           JACOCO_REPORT_DIRECTORY: ${{ inputs.jacoco-report-directory }}
-          WORKING_DIRECTORY: ${{ inputs.working-directory }}
         run: bash "$GITHUB_WORKSPACE/.qv-shared-workflows/.github/scripts/write-sbt-jacoco-summary.sh"
       - uses: actions/github-script@v7
         if: ${{ always() && github.event_name == 'pull_request' && steps.jacoco-summary.outputs.has_structured_summary == 'true' }}

@@ -275,19 +275,8 @@ line_count() {
   wc -l < "$file" | tr -d ' '
 }
 
-artifact_markdown_line() {
-  if [ -n "${ARTIFACT_URL:-}" ]; then
-    printf -- '- HTML report: [download artifact](%s)' "$ARTIFACT_URL"
-  else
-    printf -- '- HTML report: not uploaded'
-  fi
-}
-
 write_comment_header() {
   echo '### SBT Jacoco coverage'
-  echo ''
-  artifact_markdown_line
-  echo ''
   echo ''
 }
 
