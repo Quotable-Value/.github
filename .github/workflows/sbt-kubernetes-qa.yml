@@ -97,6 +97,11 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-sbt-${{ github.event.repository.name }}-
             ${{ runner.os }}-sbt-
+      - name: Clean restored SBT cache locks
+        run: |
+          rm -fv ~/.ivy2/.sbt.ivy.lock
+          find ~/.ivy2/cache -name "ivydata-*.properties" -delete 2>/dev/null || true
+          find ~/.sbt -name "*.lock" -delete 2>/dev/null || true
       - uses: sbt/setup-sbt@v1
       - uses: aws-actions/configure-aws-credentials@v4
         if: ${{ inputs.aws-role-to-assume != '' || vars.AWS_CODEARTIFACT_READ_ROLE_ARN != '' }}
