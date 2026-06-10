@@ -277,7 +277,7 @@ line_count() {
 
 artifact_markdown_line() {
   if [ -n "${ARTIFACT_URL:-}" ]; then
-    printf -- '- HTML report: [workflow artifact](%s)' "$ARTIFACT_URL"
+    printf -- '- HTML report: [download artifact](%s)' "$ARTIFACT_URL"
   else
     printf -- '- HTML report: not uploaded'
   fi
@@ -286,9 +286,6 @@ artifact_markdown_line() {
 write_comment_header() {
   echo '### SBT Jacoco coverage'
   echo ''
-  echo "- Working directory: \`${WORKING_DIRECTORY:-.}\`"
-  echo "- Command: \`${COVERAGE_COMMAND:-}\`"
-  echo "- Result: \`${COVERAGE_RESULT:-skipped}\`"
   artifact_markdown_line
   echo ''
   echo ''
