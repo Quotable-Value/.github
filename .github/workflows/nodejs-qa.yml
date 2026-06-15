@@ -38,6 +38,11 @@ on:
         required: false
         type: string
         default: .
+      report-name:
+        description: Project name to include in PR report headings.
+        required: false
+        type: string
+        default: ''
       install-command:
         description: Dependency installation command.
         required: false
@@ -146,11 +151,19 @@ jobs:
       - name: Write lint summary
         id: lint-summary
         if: ${{ always() }}
+        env:
+          REPORT_NAME: ${{ inputs.report-name }}
         run: |
           lint_log="$RUNNER_TEMP/nodejs-lint-${{ steps.qa-meta.outputs.artifact_suffix }}.log"
           lint_json="$RUNNER_TEMP/nodejs-lint-${{ steps.qa-meta.outputs.artifact_suffix }}.json"
           comment_file="$RUNNER_TEMP/nodejs-lint-${{ steps.qa-meta.outputs.artifact_suffix }}.md"
           echo "comment_file=$comment_file" >> "$GITHUB_OUTPUT"
+          report_title="NodeJS lint report"
+          summary_title="NodeJS linting"
+          if [ -n "$REPORT_NAME" ]; then
+            report_title="$REPORT_NAME $report_title"
+            summary_title="$REPORT_NAME $summary_title"
+          fi
           lint_problem_summary="No ESLint problems reported."
           if [ -s "$lint_log" ]; then
             lint_problem_summary=$(grep -E '[0-9]+ problems? \([0-9]+ errors?, [0-9]+ warnings?\)' "$lint_log" | tail -n 1 || true)
@@ -159,13 +172,14 @@ jobs:
             fi
           fi
 
-          LINT_JSON_FILE="$lint_json" LINT_PROBLEM_SUMMARY="$lint_problem_summary" COMMENT_FILE="$comment_file" node <<'NODE'
+          LINT_JSON_FILE="$lint_json" LINT_PROBLEM_SUMMARY="$lint_problem_summary" COMMENT_FILE="$comment_file" REPORT_TITLE="$report_title" node <<'NODE'
           const fs = require('fs');
           const path = require('path');
 
           const jsonFile = process.env.LINT_JSON_FILE;
           const fallbackSummary = process.env.LINT_PROBLEM_SUMMARY || 'No ESLint problem summary was reported.';
           const commentFile = process.env.COMMENT_FILE;
+          const reportTitle = process.env.REPORT_TITLE || 'NodeJS lint report';
 
           const escapeCell = (value) => String(value ?? '-')
             .replace(/\r?\n/g, ' ')
@@ -178,7 +192,7 @@ jobs:
           };
 
           const fallback = () => [
-            '### NodeJS lint report',
+            `### ${reportTitle}`,
             '',
             '```text',
             fallbackSummary,
@@ -217,7 +231,7 @@ jobs:
             : `${problemCount} ${problemWord} (${totals.errors} ${errorWord}, ${totals.warnings} ${warningWord})`;
 
           const lines = [
-            '### NodeJS lint report',
+            `### ${reportTitle}`,
             '',
             `**${summary}**`,
             '',
@@ -265,7 +279,7 @@ jobs:
           NODE
 
           {
-            echo "### NodeJS linting"
+            echo "### $summary_title"
             echo ""
             echo "- Working directory: \`${{ inputs.working-directory }}\`"
             echo "- Install result: \`${{ steps.install.outcome || 'skipped' }}\`"
@@ -387,12 +401,20 @@ jobs:
       - name: Write unit summary
         id: unit-summary
         if: ${{ always() }}
+        env:
+          REPORT_NAME: ${{ inputs.report-name }}
         run: |
           comment_file="$RUNNER_TEMP/nodejs-unit-${{ steps.qa-meta.outputs.artifact_suffix }}.md"
           echo "comment_file=$comment_file" >> "$GITHUB_OUTPUT"
+          report_title="NodeJS unit report"
+          summary_title="NodeJS unit"
+          if [ -n "$REPORT_NAME" ]; then
+            report_title="$REPORT_NAME $report_title"
+            summary_title="$REPORT_NAME $summary_title"
+          fi
 
           {
-            echo "### NodeJS unit"
+            echo "### $summary_title"
             echo ""
             echo "- Working directory: \`${{ inputs.working-directory }}\`"
             echo "- Install result: \`${{ steps.install.outcome || 'skipped' }}\`"
@@ -407,9 +429,10 @@ jobs:
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
-          COMMENT_FILE="$comment_file" node <<'NODE'
+          COMMENT_FILE="$comment_file" REPORT_TITLE="$report_title" node <<'NODE'
           const fs = require('fs');
           const path = require('path');
+          const reportTitle = process.env.REPORT_TITLE || 'NodeJS unit report';
 
           const sections = [];
           const readJson = (file) => {
@@ -451,7 +474,7 @@ jobs:
           if (sections.length) {
             fs.writeFileSync(
               process.env.COMMENT_FILE,
-              ['### NodeJS unit report', '', ...sections].join('\n\n') + '\n',
+              [`### ${reportTitle}`, '', ...sections].join('\n\n') + '\n',
             );
           }
           NODE
