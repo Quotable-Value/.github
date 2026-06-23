@@ -1,0 +1,257 @@
+name: NodeJS Unit
+
+on:
+  workflow_call:
+    inputs:
+      runner:
+        description: Runner label to use for NodeJS checks.
+        required: false
+        type: string
+        default: ubuntu-latest
+      codebuild-project-name:
+        description: CodeBuild project name used to build the runner label.
+        required: false
+        type: string
+        default: ''
+      aws-region:
+        description: AWS region for CodeArtifact authentication.
+        required: false
+        type: string
+        default: ap-southeast-2
+      aws-role-to-assume:
+        description: AWS role ARN used to access CodeArtifact.
+        required: false
+        type: string
+        default: arn:aws:iam::948396734470:role/github-actions-codeartifact-read
+      ecr-login:
+        description: Log in to Amazon ECR before running unit test coverage.
+        required: false
+        type: boolean
+        default: false
+      node-version:
+        description: Node.js version to install before running npm commands.
+        required: false
+        type: string
+        default: '24'
+      working-directory:
+        description: Directory containing the NodeJS package.json.
+        required: false
+        type: string
+        default: .
+      project-name:
+        description: Project name to prefix PR report headings.
+        required: false
+        type: string
+        default: ''
+      install-command:
+        description: Dependency installation command.
+        required: false
+        type: string
+        default: npm install
+      coverage-command:
+        description: Unit test coverage command.
+        required: false
+        type: string
+        default: npm run coverage
+
+permissions:
+  contents: read
+  id-token: write
+  issues: write
+  pull-requests: write
+
+jobs:
+  unit:
+    runs-on: ${{ inputs.codebuild-project-name != '' && format('codebuild-{0}-{1}-{2}', inputs.codebuild-project-name, github.run_id, github.run_attempt) || inputs.runner }}
+    permissions:
+      contents: read
+      id-token: write
+      issues: write
+      pull-requests: write
+    env:
+      ENV: local
+    defaults:
+      run:
+        working-directory: ${{ inputs.working-directory }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Prepare report metadata
+        id: qa-meta
+        run: |
+          suffix='${{ inputs.working-directory }}'
+          if [ "$suffix" = "." ]; then suffix="root"; fi
+          suffix=$(printf '%s' "$suffix" | sed -E 's#[^A-Za-z0-9_.-]+#-#g')
+          echo "artifact_suffix=$suffix" >> "$GITHUB_OUTPUT"
+
+          cache_path='${{ inputs.working-directory }}/package-lock.json'
+          if [ "${{ inputs.working-directory }}" = "." ]; then cache_path="package-lock.json"; fi
+          echo "npm_cache_dependency_path=$cache_path" >> "$GITHUB_OUTPUT"
+          if [ -f "$cache_path" ]; then
+            echo "npm_cache_enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "npm_cache_enabled=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/setup-node@v4
+        if: ${{ inputs.node-version != '' && steps.qa-meta.outputs.npm_cache_enabled == 'true' }}
+        with:
+          node-version: ${{ inputs.node-version }}
+          cache: npm
+          cache-dependency-path: ${{ steps.qa-meta.outputs.npm_cache_dependency_path }}
+
+      - uses: actions/setup-node@v4
+        if: ${{ inputs.node-version != '' && steps.qa-meta.outputs.npm_cache_enabled != 'true' }}
+        with:
+          node-version: ${{ inputs.node-version }}
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        if: ${{ inputs.aws-role-to-assume != '' || vars.AWS_CODEARTIFACT_READ_ROLE_ARN != '' }}
+        with:
+          role-to-assume: ${{ inputs.aws-role-to-assume || vars.AWS_CODEARTIFACT_READ_ROLE_ARN }}
+          aws-region: ${{ inputs.aws-region }}
+
+      - name: Export CodeArtifact token
+        run: |
+          CODEARTIFACT_AUTH_TOKEN=$(aws codeartifact get-authorization-token --domain quotable-value --domain-owner 948396734470 --region "${{ inputs.aws-region }}" --query authorizationToken --output text)
+          echo "::add-mask::$CODEARTIFACT_AUTH_TOKEN"
+          echo "CODEARTIFACT_AUTH_TOKEN=$CODEARTIFACT_AUTH_TOKEN" >> "$GITHUB_ENV"
+
+      - name: Log in to Amazon ECR
+        if: ${{ inputs.ecr-login }}
+        run: |
+          aws ecr get-login-password --region "${{ inputs.aws-region }}" | docker login --username AWS --password-stdin "948396734470.dkr.ecr.${{ inputs.aws-region }}.amazonaws.com"
+
+      - name: Install dependencies
+        id: install
+        run: ${{ inputs.install-command }}
+
+      - name: Prepare local test config
+        run: |
+          if [ ! -f config.json ] && [ -f config.sample.json ]; then cp config.sample.json config.json; fi
+          if [ ! -f test/config.json ] && [ -f test/config.sample.json ]; then cp test/config.sample.json test/config.json; fi
+
+      - name: Run unit tests with coverage
+        id: coverage
+        run: ${{ inputs.coverage-command }}
+
+      - name: Write unit summary
+        id: unit-summary
+        if: ${{ always() }}
+        env:
+          PROJECT_NAME: ${{ inputs.project-name }}
+        run: |
+          comment_file="$RUNNER_TEMP/nodejs-unit-${{ steps.qa-meta.outputs.artifact_suffix }}.md"
+          echo "comment_file=$comment_file" >> "$GITHUB_OUTPUT"
+          report_title="NodeJS unit report"
+          summary_title="NodeJS unit"
+          if [ -n "$PROJECT_NAME" ]; then
+            report_title="$PROJECT_NAME $report_title"
+            summary_title="$PROJECT_NAME $summary_title"
+          fi
+
+          {
+            echo "### $summary_title"
+            echo ""
+            echo "- Working directory: \`${{ inputs.working-directory }}\`"
+            echo "- Install result: \`${{ steps.install.outcome || 'skipped' }}\`"
+            echo "- ECR login: \`${{ inputs.ecr-login }}\`"
+            echo "- Unit result: \`${{ steps.coverage.outcome || 'skipped' }}\`"
+            echo ""
+            echo "Command:"
+            echo '```bash'
+            cat <<'COMMAND'
+          ${{ inputs.coverage-command }}
+          COMMAND
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          COMMENT_FILE="$comment_file" REPORT_TITLE="$report_title" node <<'NODE'
+          const fs = require('fs');
+          const path = require('path');
+          const reportTitle = process.env.REPORT_TITLE || 'NodeJS unit report';
+
+          const sections = [];
+          const readJson = (file) => {
+            try {
+              return JSON.parse(fs.readFileSync(file, 'utf8'));
+            } catch {
+              return null;
+            }
+          };
+
+          const coverage = readJson(path.join('coverage', 'coverage-summary.json'));
+          if (coverage && coverage.total) {
+            const rows = ['statements', 'branches', 'functions', 'lines']
+              .filter((key) => coverage.total[key])
+              .map((key) => `| ${key} | ${coverage.total[key].pct ?? '-'}% | ${coverage.total[key].covered ?? '-'} | ${coverage.total[key].total ?? '-'} |`);
+            if (rows.length) {
+              sections.push([
+                '#### Coverage',
+                '',
+                '| Metric | Pct | Covered | Total |',
+                '| --- | ---: | ---: | ---: |',
+                ...rows,
+              ].join('\n'));
+            }
+          }
+
+          const mochawesome = readJson(path.join('mochawesome-report', 'mochawesome.json'));
+          if (mochawesome && mochawesome.stats) {
+            const stats = mochawesome.stats;
+            sections.push([
+              '#### Mocha',
+              '',
+              '| Tests | Passes | Failures | Pending | Duration |',
+              '| ---: | ---: | ---: | ---: | ---: |',
+              `| ${stats.tests ?? '-'} | ${stats.passes ?? '-'} | ${stats.failures ?? '-'} | ${stats.pending ?? '-'} | ${stats.duration ?? '-'}ms |`,
+            ].join('\n'));
+          }
+
+          if (sections.length) {
+            fs.writeFileSync(
+              process.env.COMMENT_FILE,
+              [`### ${reportTitle}`, '', ...sections].join('\n\n') + '\n',
+            );
+          }
+          NODE
+
+          if [ -s "$comment_file" ]; then
+            cat "$comment_file" >> "$GITHUB_STEP_SUMMARY"
+            echo "has_structured_summary=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "" >> "$GITHUB_STEP_SUMMARY"
+            echo "No structured test report was found." >> "$GITHUB_STEP_SUMMARY"
+            echo "has_structured_summary=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/upload-artifact@v4
+        if: ${{ always() }}
+        with:
+          name: nodejs-unit-${{ steps.qa-meta.outputs.artifact_suffix }}-reports
+          if-no-files-found: ignore
+          path: |
+            ${{ inputs.working-directory }}/coverage/**
+            ${{ inputs.working-directory }}/mochawesome-report/**
+            ${{ inputs.working-directory }}/test-results/**
+            ${{ inputs.working-directory }}/junit*.xml
+
+      - uses: actions/github-script@v7
+        if: ${{ always() && github.event_name == 'pull_request' && steps.unit-summary.outputs.has_structured_summary == 'true' }}
+        env:
+          COMMENT_FILE: ${{ steps.unit-summary.outputs.comment_file }}
+          COMMENT_MARKER: '<!-- qv-qa-summary:nodejs-unit:${{ steps.qa-meta.outputs.artifact_suffix }} -->'
+        with:
+          script: |
+            const fs = require('fs');
+            const marker = process.env.COMMENT_MARKER;
+            const body = `${marker}\n${fs.readFileSync(process.env.COMMENT_FILE, 'utf8')}`;
+            const { owner, repo } = context.repo;
+            const issue_number = context.payload.pull_request.number;
+            const { data: comments } = await github.rest.issues.listComments({ owner, repo, issue_number, per_page: 100 });
+            const existing = comments.find((comment) => comment.user.type === 'Bot' && comment.body?.includes(marker));
+            if (existing) {
+              await github.rest.issues.updateComment({ owner, repo, comment_id: existing.id, body });
+            } else {
+              await github.rest.issues.createComment({ owner, repo, issue_number, body });
+            }
